@@ -166,11 +166,12 @@ class Cassette(object):
     def __init__(self, path, serializer=yamlserializer, record_mode='once',
                  match_on=(uri, method), before_record_request=None,
                  before_record_response=None, custom_patches=(),
-                 inject=False):
+                 inject=False, match_on_kwargs=None):
 
         self._path = path
         self._serializer = serializer
         self._match_on = match_on
+        self._match_on_kwargs = match_on_kwargs or {}
         self._before_record_request = before_record_request or (lambda x: x)
         self._before_record_response = before_record_response or (lambda x: x)
         self.inject = inject

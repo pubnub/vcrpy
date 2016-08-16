@@ -71,7 +71,6 @@ else:
     _SimpleAsyncHTTPClient_fetch_impl = \
         tornado.simple_httpclient.SimpleAsyncHTTPClient.fetch_impl
 
-
 try:
     import tornado.curl_httpclient
 except ImportError:  # pragma: no cover
@@ -120,6 +119,9 @@ class CassettePatcherBuilder(object):
     def _build_patcher(self, obj, patched_attribute, replacement_class):
         if not hasattr(obj, patched_attribute):
             return
+
+        if isinstance(replacement_class, object) and hasattr(replacement_class, 'wrap_cassette'):
+            replacement_class = replacement_class.wrap_cassette(self._cassette)
 
         return mock.patch.object(obj, patched_attribute,
                                  self._recursively_apply_get_cassette_subclass(
