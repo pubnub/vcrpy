@@ -106,6 +106,7 @@ class CassettePatcherBuilder(object):
         return itertools.chain(
             self._httplib(), self._requests(), self._boto3(), self._urllib3(),
             self._httplib2(), self._boto(), self._tornado(), self._aiohttp(),
+            self._twisted(),
             self._build_patchers_from_mock_triples(
                 self._cassette.custom_patches
             ),
@@ -254,6 +255,19 @@ class CassettePatcherBuilder(object):
         else:
             from .stubs.boto_stubs import VCRCertValidatingHTTPSConnection
             yield cpool, 'CertValidatingHTTPSConnection', VCRCertValidatingHTTPSConnection
+
+    @_build_patchers_from_mock_triples_decorator
+    def _twisted(self):
+        try:
+            from twisted.web.client import Agent
+        except ImportError:
+            pass
+        else:
+            from .stubs.twisted_stubs import new_vcr_request
+
+            vcr_request = new_vcr_request(self._cassette, Agent.request)
+
+            yield Agent, 'request', vcr_request
 
     @_build_patchers_from_mock_triples_decorator
     def _tornado(self):
