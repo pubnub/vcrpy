@@ -3,6 +3,7 @@ import functools
 import inspect
 import os
 import types
+from functools import partial
 
 import six
 
@@ -82,11 +83,19 @@ class VCR(object):
             )
         return serializer
 
-    def _get_matchers(self, matcher_names):
+    def _get_matchers(self, matcher_names, all_matchers_kwagrs):
         matchers = []
         try:
             for m in matcher_names:
-                matchers.append(self.matchers[m])
+                if m in all_matchers_kwagrs:
+                    kwargs = all_matchers_kwagrs[m]
+
+                    if isinstance(kwargs, dict) and len(kwargs) > 0:
+                        matchers.append(partial(self.matchers[m], **kwargs))
+                    else:
+                        matchers.append(self.matchers[m])
+                else:
+                    matchers.append(self.matchers[m])
         except KeyError:
             raise KeyError(
                 "Matcher {0} doesn't exist or isn't registered".format(m)
@@ -144,7 +153,8 @@ class VCR(object):
         merged_config = {
             'serializer': self._get_serializer(serializer_name),
             'match_on': self._get_matchers(
-                tuple(matcher_names) + tuple(additional_matchers)
+                tuple(matcher_names) + tuple(additional_matchers),
+                kwargs.get('match_on_kwargs', {})
             ),
             'record_mode': kwargs.get('record_mode', self.record_mode),
             'before_record_request': self._build_before_record_request(kwargs),
