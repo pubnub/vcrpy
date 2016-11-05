@@ -84,7 +84,7 @@ def new_vcr_request(cassette, real_request_func):
                         return finished
                     except Exception as ex:
                         print("Receiving failed!")
-                        print ex
+                        print(ex)
 
                 def record_cassette(response):
                     try:
@@ -101,7 +101,7 @@ def new_vcr_request(cassette, real_request_func):
                         return response
                     except Exception as ex:
                         print("Recording failed!")
-                        print ex
+                        print(ex)
 
 
                 agent = Agent(reactor)
