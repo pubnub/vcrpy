@@ -31,6 +31,7 @@ extras_require = {
     ':python_version in "2.4, 2.5, 2.6"':
         ['contextlib2', 'backport_collections', 'mock'],
     ':python_version in "2.7, 3.1, 3.2"': ['contextlib2', 'mock'],
+    ':python_version in "3.4, 3.5, 3.6"': ['yarl'],
 }
 
 
@@ -55,7 +56,7 @@ if sys.version_info[0] == 2:
 
 setup(
     name='vcrpy',
-    version='1.10.3',
+    version='1.10.5',
     description=(
         "Automatically mock your HTTP interactions to simplify and "
         "speed up testing"
