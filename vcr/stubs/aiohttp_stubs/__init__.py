@@ -35,8 +35,9 @@ def vcr_request(cassette, real_request):
         data = kwargs.get('data')
         params = kwargs.get('params')
         if params:
-            for k, v in params.items():
-                params[k] = str(v)
+            if not isinstance(params, str):
+                for k, v in params.items():
+                    params[k] = str(v)
 
         request_url = URL(url).with_query(params)
         vcr_request = Request(method, str(request_url), data, headers)
