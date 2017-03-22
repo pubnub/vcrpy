@@ -34,12 +34,17 @@ def vcr_request(cassette, real_request):
         headers = self._prepare_headers(headers)
         data = kwargs.get('data')
         params = kwargs.get('params')
-        if params:
-            if not isinstance(params, str):
-                for k, v in params.items():
-                    params[k] = str(v)
 
-        request_url = URL(url).with_query(params)
+        if isinstance(url, URL):
+            # WARNING: forcing encoded=True due pubnub/asyncio needs
+            request_url = URL(url, encoded=True)
+        else:
+            if params:
+                if not isinstance(params, str):
+                    for k, v in params.items():
+                        params[k] = str(v)
+            request_url = URL(url).with_query(params)
+
         vcr_request = Request(method, str(request_url), data, headers)
 
         if cassette.can_play_response_for(vcr_request):
