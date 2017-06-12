@@ -3,25 +3,36 @@ import functools
 from twisted.internet import reactor
 from twisted.internet.defer import Deferred
 from twisted.internet.protocol import Protocol
-
+from twisted.python.failure import Failure
+from twisted.web.client import ResponseDone
 from twisted.web.client import Agent
+from twisted.web.http_headers import Headers
 
 from vcr.request import Request
 from vcr.errors import CannotOverwriteExistingCassetteException
+
 
 class TwistedResponse(object):
     def __init__(self, body, code):
         self.body = body
         self.code = code
 
+
 class VCRResponse(Protocol):
-    def __init__(self, response_string, code):
+    def __init__(self, response_string, code, headers):
         self.response_string = response_string
         self.code = code
+        self.headers = headers
+        self._body = response_string
+        self.length = len(self.response_string)
 
     def deliverBody(self, protocol):
-        protocol.dataReceived(self.response_string)
-        protocol.connectionLost(None)
+        # protocol.dataReceived(self.response_string)
+        # protocol.connectionLost(None)
+        for chunk in self._body:
+            protocol.dataReceived(chunk)
+        protocol.connectionLost(Failure(ResponseDone()))
+
 
 class RealResponse(Protocol):
     def __init__(self, finished, code):
@@ -51,15 +62,18 @@ def new_vcr_request(cassette, real_request_func):
         if cassette.can_play_response_for(vcr_request):
             vcr_response = cassette.play_response(vcr_request)
 
-            recorded_headers = vcr_response['headers']
-            if isinstance(recorded_headers, dict):
-                recorded_headers = recorded_headers.items()
-            for k, vs in recorded_headers:
-                for v in vs:
-                    headers.add(k, v)
+            # recorded_headers = vcr_response['headers']
+            # if isinstance(recorded_headers, Headers):
+            #     print("recorded_headers._rawHeaders")
+            #     print(recorded_headers._rawHeaders)
+            #     recorded_headers = recorded_headers._rawHeaders
+            # for k, vs in recorded_headers:
+            #     for v in vs:
+            #         headers.add(k, v)
             response = VCRResponse(
                 code=vcr_response['status']['code'],
-                response_string=vcr_response['body']['string']
+                response_string=vcr_response['body']['string'],
+                headers=vcr_response['headers']
             )
 
 
@@ -67,14 +81,19 @@ def new_vcr_request(cassette, real_request_func):
             if cassette.write_protected and cassette.filter_request(
                 vcr_request
             ):
+                print(  "No match for the request (%r) was found. "
+                        "Can't overwrite existing cassette (%r) in "
+                        "your current record mode (%r)."
+                        % (vcr_request, cassette._path, cassette.record_mode))
                 response = VCRResponse(
                     code=599,
-                    response_string=CannotOverwriteExistingCassetteException(
+                    response_string=str(CannotOverwriteExistingCassetteException(
                         "No match for the request (%r) was found. "
                         "Can't overwrite existing cassette (%r) in "
                         "your current record mode (%r)."
                         % (vcr_request, cassette._path, cassette.record_mode)
-                    )
+                    )),
+                    headers=Headers({})
                 )
             else:
                 def received(response):
