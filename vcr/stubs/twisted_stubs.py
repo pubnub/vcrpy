@@ -1,5 +1,5 @@
 import functools
-
+from six import PY3
 from twisted.internet import reactor
 from twisted.internet.defer import Deferred
 from twisted.internet.protocol import Protocol
@@ -27,10 +27,11 @@ class VCRResponse(Protocol):
         self.length = len(self.response_string)
 
     def deliverBody(self, protocol):
-        # protocol.dataReceived(self.response_string)
+        protocol.dataReceived(self.response_string)
         # protocol.connectionLost(None)
-        for chunk in self._body:
-            protocol.dataReceived(chunk)
+        # for chunk in self._body:
+        #     print('bum!')
+        #     protocol.dataReceived(chunk)
         protocol.connectionLost(Failure(ResponseDone()))
 
 
@@ -48,6 +49,10 @@ def new_vcr_request(cassette, real_request_func):
     @functools.wraps(real_request_func)
     def vcr_request(self, method, uri, headers=None, bodyProducer=None):
         d = Deferred()
+
+        if PY3:
+            uri = uri.decode('utf-8')
+            method = method.decode('utf-8')
 
         # TODO: get body
         vcr_request = Request(
@@ -70,10 +75,19 @@ def new_vcr_request(cassette, real_request_func):
             # for k, vs in recorded_headers:
             #     for v in vs:
             #         headers.add(k, v)
+
+            if PY3:
+                code = str(vcr_response['status']['code'])
+            else:
+                code = vcr_response['status']['code']
+
+            response_string = vcr_response['body']['string']
+            res_headers = vcr_response['headers']
+
             response = VCRResponse(
-                code=vcr_response['status']['code'],
-                response_string=vcr_response['body']['string'],
-                headers=vcr_response['headers']
+                code=code,
+                response_string=response_string,
+                headers=res_headers
             )
 
 
@@ -81,18 +95,20 @@ def new_vcr_request(cassette, real_request_func):
             if cassette.write_protected and cassette.filter_request(
                 vcr_request
             ):
-                print(  "No match for the request (%r) was found. "
-                        "Can't overwrite existing cassette (%r) in "
-                        "your current record mode (%r)."
-                        % (vcr_request, cassette._path, cassette.record_mode))
+
+                error_message = ("No match for the request (%r) was found. "
+                                 "Can't overwrite existing cassette (%r) in "
+                                 "your current record mode (%r)."
+                                 % (vcr_request, cassette._path, cassette.record_mode))
+
+                print(error_message)
+
+                if PY3:
+                    error_message = bytearray(error_message, 'utf-8')
+
                 response = VCRResponse(
                     code=599,
-                    response_string=str(CannotOverwriteExistingCassetteException(
-                        "No match for the request (%r) was found. "
-                        "Can't overwrite existing cassette (%r) in "
-                        "your current record mode (%r)."
-                        % (vcr_request, cassette._path, cassette.record_mode)
-                    )),
+                    response_string=error_message,
                     headers=Headers({})
                 )
             else:
