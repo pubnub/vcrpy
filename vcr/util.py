@@ -1,13 +1,17 @@
-import collections
 import types
+
+try:
+    from collections.abc import Mapping, MutableMapping
+except ImportError:
+    from collections import Mapping, MutableMapping
 
 
 # Shamelessly stolen from https://github.com/kennethreitz/requests/blob/master/requests/structures.py
-class CaseInsensitiveDict(collections.MutableMapping):
+class CaseInsensitiveDict(MutableMapping):
     """
     A case-insensitive ``dict``-like object.
     Implements all methods and operations of
-    ``collections.MutableMapping`` as well as dict's ``copy``. Also
+    ``collections.abc.MutableMapping`` as well as dict's ``copy``. Also
     provides ``lower_items``.
     All keys are expected to be strings. The structure remembers the
     case of the last key to be set, and ``iter(instance)``,
@@ -25,6 +29,7 @@ class CaseInsensitiveDict(collections.MutableMapping):
     operations are given keys that have equal ``.lower()``s, the
     behavior is undefined.
     """
+
     def __init__(self, data=None, **kwargs):
         self._store = dict()
         if data is None:
@@ -50,14 +55,10 @@ class CaseInsensitiveDict(collections.MutableMapping):
 
     def lower_items(self):
         """Like iteritems(), but with all lowercase keys."""
-        return (
-            (lowerkey, keyval[1])
-            for (lowerkey, keyval)
-            in self._store.items()
-        )
+        return ((lowerkey, keyval[1]) for (lowerkey, keyval) in self._store.items())
 
     def __eq__(self, other):
-        if isinstance(other, collections.Mapping):
+        if isinstance(other, Mapping):
             other = CaseInsensitiveDict(other)
         else:
             return NotImplemented
@@ -88,37 +89,30 @@ def compose(*functions):
             if function:
                 res = function(res)
         return res
+
     return composed
 
 
 def read_body(request):
-    if hasattr(request.body, 'read'):
+    if hasattr(request.body, "read"):
         return request.body.read()
     return request.body
 
 
-def auto_decorate(
-    decorator,
-    predicate=lambda name, value: isinstance(value, types.FunctionType)
-):
+def auto_decorate(decorator, predicate=lambda name, value: isinstance(value, types.FunctionType)):
     def maybe_decorate(attribute, value):
         if predicate(attribute, value):
             value = decorator(value)
         return value
 
     class DecorateAll(type):
-
         def __setattr__(cls, attribute, value):
-            return super(DecorateAll, cls).__setattr__(
-                attribute, maybe_decorate(attribute, value)
-            )
+            return super().__setattr__(attribute, maybe_decorate(attribute, value))
 
         def __new__(cls, name, bases, attributes_dict):
-            new_attributes_dict = dict(
-                (attribute, maybe_decorate(attribute, value))
-                for attribute, value in attributes_dict.items()
-            )
-            return super(DecorateAll, cls).__new__(
-                cls, name, bases, new_attributes_dict
-            )
+            new_attributes_dict = {
+                attribute: maybe_decorate(attribute, value) for attribute, value in attributes_dict.items()
+            }
+            return super().__new__(cls, name, bases, new_attributes_dict)
+
     return DecorateAll

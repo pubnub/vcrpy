@@ -1,10 +1,16 @@
-|PyPI| |Build Status| |Waffle Ready| |Gitter|
 
-VCR.py
-======
+###########
+VCR.py 📼
+###########
 
-.. image:: https://raw.github.com/kevin1024/vcrpy/master/vcr.png
-   :alt: vcr.py
+
+|PyPI| |Python versions| |Build Status| |CodeCov| |Gitter| |CodeStyleBlack|
+
+----
+
+.. image:: https://vcrpy.readthedocs.io/en/latest/_images/vcr.svg
+   :alt: vcr.py logo
+
 
 This is a Python version of `Ruby's VCR
 library <https://github.com/vcr/vcr>`__.
@@ -41,32 +47,29 @@ VCR.py will detect the absence of a cassette file and once again record
 all HTTP interactions, which will update them to correspond to the new
 API.
 
-Support
--------
+Usage with Pytest
+-----------------
 
-VCR.py works great with the following HTTP clients:
-
--  requests
--  aiohttp
--  urllib3
--  tornado
--  urllib2
--  boto
--  boto3
-
+There is a library to provide some pytest fixtures called pytest-recording https://github.com/kiwicom/pytest-recording
 
 License
-=======
+-------
 
 This library uses the MIT license. See `LICENSE.txt <LICENSE.txt>`__ for
 more details
 
 .. |PyPI| image:: https://img.shields.io/pypi/v/vcrpy.svg
-   :target: https://pypi.python.org/pypi/vcrpy-unittest
-.. |Build Status| image:: https://secure.travis-ci.org/kevin1024/vcrpy.png?branch=master
+   :target: https://pypi.python.org/pypi/vcrpy
+.. |Python versions| image:: https://img.shields.io/pypi/pyversions/vcrpy.svg
+   :target: https://pypi.python.org/pypi/vcrpy
+.. |Build Status| image:: https://secure.travis-ci.org/kevin1024/vcrpy.svg?branch=master
    :target: http://travis-ci.org/kevin1024/vcrpy
-.. |Waffle Ready| image:: https://badge.waffle.io/kevin1024/vcrpy.png?label=ready&title=waffle
-   :target: https://waffle.io/kevin1024/vcrpy
 .. |Gitter| image:: https://badges.gitter.im/Join%20Chat.svg
    :alt: Join the chat at https://gitter.im/kevin1024/vcrpy
    :target: https://gitter.im/kevin1024/vcrpy?utm_source=badge&utm_medium=badge&utm_campaign=pr-badge&utm_content=badge
+.. |CodeCov| image:: https://codecov.io/gh/kevin1024/vcrpy/branch/master/graph/badge.svg
+   :target: https://codecov.io/gh/kevin1024/vcrpy
+   :alt: Code Coverage Status
+.. |CodeStyleBlack| image:: https://img.shields.io/badge/code%20style-black-000000.svg 
+   :target: https://github.com/psf/black
+   :alt: Code Style: black

@@ -1,14 +1,9 @@
 import logging
 from .config import VCR
+from logging import NullHandler
+from .record_mode import RecordMode as mode  # noqa import is not used in this file
 
-# Set default logging handler to avoid "No handler found" warnings.
-try:  # Python 2.7+
-    from logging import NullHandler
-except ImportError:
-    class NullHandler(logging.Handler):
-        def emit(self, record):
-            pass
-
+__version__ = "4.1.1"
 
 logging.getLogger(__name__).addHandler(NullHandler())
 

@@ -1,22 +1,33 @@
+import collections
+import contextlib
+import copy
 import sys
 import inspect
 import logging
 
 import wrapt
 
-from .compat import contextlib, collections
 from .errors import UnhandledHTTPRequestError
-from .matchers import requests_match, uri, method
+from .matchers import requests_match, uri, method, get_matchers_results
 from .patch import CassettePatcherBuilder
-from .persist import load_cassette, save_cassette
 from .serializers import yamlserializer
+from .persisters.filesystem import FilesystemPersister
 from .util import partition_dict
+from ._handle_coroutine import handle_coroutine
+from .record_mode import RecordMode
+
+try:
+    from asyncio import iscoroutinefunction
+except ImportError:
+
+    def iscoroutinefunction(*args, **kwargs):
+        return False
 
 
 log = logging.getLogger(__name__)
 
 
-class CassetteContextDecorator(object):
+class CassetteContextDecorator:
     """Context manager/decorator that handles installing the cassette and
     removing cassettes.
 
@@ -34,7 +45,7 @@ class CassetteContextDecorator(object):
     this class as a context manager in ``__exit__``.
     """
 
-    _non_cassette_arguments = ('path_transformer', 'func_path_generator')
+    _non_cassette_arguments = ("path_transformer", "func_path_generator")
 
     @classmethod
     def from_args(cls, cassette_class, **kwargs):
@@ -49,14 +60,10 @@ class CassetteContextDecorator(object):
         with contextlib.ExitStack() as exit_stack:
             for patcher in CassettePatcherBuilder(cassette).build():
                 exit_stack.enter_context(patcher)
-            log_format = '{action} context for cassette at {path}.'
-            log.debug(log_format.format(
-                action="Entering", path=cassette._path
-            ))
+            log_format = "{action} context for cassette at {path}."
+            log.debug(log_format.format(action="Entering", path=cassette._path))
             yield cassette
-            log.debug(log_format.format(
-                action="Exiting", path=cassette._path
-            ))
+            log.debug(log_format.format(action="Exiting", path=cassette._path))
             # TODO(@IvanMalison): Hmmm. it kind of feels like this should be
             # somewhere else.
             cassette._save()
@@ -72,12 +79,11 @@ class CassetteContextDecorator(object):
         #         pass
         assert self.__finish is None, "Cassette already open."
         other_kwargs, cassette_kwargs = partition_dict(
-            lambda key, _: key in self._non_cassette_arguments,
-            self._args_getter()
+            lambda key, _: key in self._non_cassette_arguments, self._args_getter()
         )
-        if other_kwargs.get('path_transformer'):
-            transformer = other_kwargs['path_transformer']
-            cassette_kwargs['path'] = transformer(cassette_kwargs['path'])
+        if other_kwargs.get("path_transformer"):
+            transformer = other_kwargs["path_transformer"]
+            cassette_kwargs["path"] = transformer(cassette_kwargs["path"])
         self.__finish = self._patch_generator(self.cls.load(**cassette_kwargs))
         return next(self.__finish)
 
@@ -91,23 +97,28 @@ class CassetteContextDecorator(object):
         # functions are reentrant. This is required for thread
         # safety and the correct operation of recursive functions.
         args_getter = self._build_args_getter_for_decorator(function)
-        return type(self)(self.cls, args_getter)._execute_function(
-            function, args, kwargs
-        )
+        return type(self)(self.cls, args_getter)._execute_function(function, args, kwargs)
 
     def _execute_function(self, function, args, kwargs):
-        if inspect.isgeneratorfunction(function):
-            handler = self._handle_coroutine
-        else:
-            handler = self._handle_function
-        return handler(function, args, kwargs)
+        def handle_function(cassette):
+            if cassette.inject:
+                return function(cassette, *args, **kwargs)
+            else:
+                return function(*args, **kwargs)
 
-    def _handle_coroutine(self, function, args, kwargs):
-        """Wraps a coroutine so that we're inside the cassette context for the
-        duration of the coroutine.
+        if iscoroutinefunction(function):
+            return handle_coroutine(vcr=self, fn=handle_function)
+        if inspect.isgeneratorfunction(function):
+            return self._handle_generator(fn=handle_function)
+
+        return self._handle_function(fn=handle_function)
+
+    def _handle_generator(self, fn):
+        """Wraps a generator so that we're inside the cassette context for the
+        duration of the generator.
         """
         with self as cassette:
-            coroutine = self.__handle_function(cassette, function, args, kwargs)
+            coroutine = fn(cassette)
             # We don't need to catch StopIteration. The caller (Tornado's
             # gen.coroutine, for example) will handle that.
             to_yield = next(coroutine)
@@ -117,17 +128,14 @@ class CassetteContextDecorator(object):
                 except Exception:
                     to_yield = coroutine.throw(*sys.exc_info())
                 else:
-                    to_yield = coroutine.send(to_send)
+                    try:
+                        to_yield = coroutine.send(to_send)
+                    except StopIteration:
+                        break
 
-    def __handle_function(self, cassette, function, args, kwargs):
-        if cassette.inject:
-            return function(cassette, *args, **kwargs)
-        else:
-            return function(*args, **kwargs)
-
-    def _handle_function(self, function, args, kwargs):
+    def _handle_function(self, fn):
         with self as cassette:
-            return self.__handle_function(cassette, function, args, kwargs)
+            return fn(cassette)
 
     @staticmethod
     def get_function_name(function):
@@ -136,16 +144,16 @@ class CassetteContextDecorator(object):
     def _build_args_getter_for_decorator(self, function):
         def new_args_getter():
             kwargs = self._args_getter()
-            if 'path' not in kwargs:
-                name_generator = (kwargs.get('func_path_generator') or
-                                  self.get_function_name)
+            if "path" not in kwargs:
+                name_generator = kwargs.get("func_path_generator") or self.get_function_name
                 path = name_generator(function)
-                kwargs['path'] = path
+                kwargs["path"] = path
             return kwargs
+
         return new_args_getter
 
 
-class Cassette(object):
+class Cassette:
     """A container for recorded requests and responses"""
 
     @classmethod
@@ -163,19 +171,30 @@ class Cassette(object):
     def use(cls, **kwargs):
         return CassetteContextDecorator.from_args(cls, **kwargs)
 
-    def __init__(self, path, serializer=yamlserializer, record_mode='once',
-                 match_on=(uri, method), before_record_request=None,
-                 before_record_response=None, custom_patches=(),
-                 inject=False):
-
+    def __init__(
+        self,
+        path,
+        serializer=None,
+        persister=None,
+        record_mode=RecordMode.ONCE,
+        match_on=(uri, method),
+        before_record_request=None,
+        before_record_response=None,
+        custom_patches=(),
+        inject=False,
+        allow_playback_repeats=False,
+    ):
+        self._persister = persister or FilesystemPersister
         self._path = path
-        self._serializer = serializer
+        self._serializer = serializer or yamlserializer
         self._match_on = match_on
         self._before_record_request = before_record_request or (lambda x: x)
+        log.info(self._before_record_request)
         self._before_record_response = before_record_response or (lambda x: x)
         self.inject = inject
         self.record_mode = record_mode
         self.custom_patches = custom_patches
+        self.allow_playback_repeats = allow_playback_repeats
 
         # self.data is the list of (req, resp) tuples
         self.data = []
@@ -190,7 +209,7 @@ class Cassette(object):
     @property
     def all_played(self):
         """Returns True if all responses have been played, False otherwise."""
-        return self.play_count == len(self)
+        return len(self.play_counts.values()) == len(self)
 
     @property
     def requests(self):
@@ -202,14 +221,17 @@ class Cassette(object):
 
     @property
     def write_protected(self):
-        return self.rewound and self.record_mode == 'once' or \
-            self.record_mode == 'none'
+        return self.rewound and self.record_mode == RecordMode.ONCE or self.record_mode == RecordMode.NONE
 
     def append(self, request, response):
         """Add a request, response pair to this cassette"""
+        log.info("Appending request %s and response %s", request, response)
         request = self._before_record_request(request)
         if not request:
             return
+        # Deepcopy is here because mutation of `response` will corrupt the
+        # real response.
+        response = copy.deepcopy(response)
         response = self._before_record_response(response)
         if response is None:
             return
@@ -231,9 +253,7 @@ class Cassette(object):
 
     def can_play_response_for(self, request):
         request = self._before_record_request(request)
-        return request and request in self and \
-            self.record_mode != 'all' and \
-            self.rewound
+        return request and request in self and self.record_mode != RecordMode.ALL and self.rewound
 
     def play_response(self, request):
         """
@@ -241,13 +261,12 @@ class Cassette(object):
         hasn't been played back before, and mark it as played
         """
         for index, response in self._responses(request):
-            if self.play_counts[index] == 0:
+            if self.play_counts[index] == 0 or self.allow_playback_repeats:
                 self.play_counts[index] += 1
                 return response
         # The cassette doesn't contain the request asked for.
         raise UnhandledHTTPRequestError(
-            "The cassette (%r) doesn't contain the request (%r) asked for"
-            % (self._path, request)
+            "The cassette (%r) doesn't contain the request (%r) asked for" % (self._path, request)
         )
 
     def responses_of(self, request):
@@ -262,39 +281,68 @@ class Cassette(object):
             return responses
         # The cassette doesn't contain the request asked for.
         raise UnhandledHTTPRequestError(
-            "The cassette (%r) doesn't contain the request (%r) asked for"
-            % (self._path, request)
+            "The cassette (%r) doesn't contain the request (%r) asked for" % (self._path, request)
         )
+
+    def rewind(self):
+        self.play_counts = collections.Counter()
+
+    def find_requests_with_most_matches(self, request):
+        """
+        Get the most similar request(s) stored in the cassette
+        of a given request as a list of tuples like this:
+        - the request object
+        - the successful matchers as string
+        - the failed matchers and the related assertion message with the difference details as strings tuple
+
+        This is useful when a request failed to be found,
+        we can get the similar request(s) in order to know what have changed in the request parts.
+        """
+        best_matches = []
+        request = self._before_record_request(request)
+        for index, (stored_request, response) in enumerate(self.data):
+            successes, fails = get_matchers_results(request, stored_request, self._match_on)
+            best_matches.append((len(successes), stored_request, successes, fails))
+        best_matches.sort(key=lambda t: t[0], reverse=True)
+        # Get the first best matches (multiple if equal matches)
+        final_best_matches = []
+
+        if not best_matches:
+            return final_best_matches
+
+        previous_nb_success = best_matches[0][0]
+        for best_match in best_matches:
+            nb_success = best_match[0]
+            # Do not keep matches that have 0 successes,
+            # it means that the request is totally different from
+            # the ones stored in the cassette
+            if nb_success < 1 or previous_nb_success != nb_success:
+                break
+            previous_nb_success = nb_success
+            final_best_matches.append(best_match[1:])
+
+        return final_best_matches
 
     def _as_dict(self):
         return {"requests": self.requests, "responses": self.responses}
 
     def _save(self, force=False):
         if force or self.dirty:
-            save_cassette(
-                self._path,
-                self._as_dict(),
-                serializer=self._serializer
-            )
+            self._persister.save_cassette(self._path, self._as_dict(), serializer=self._serializer)
             self.dirty = False
 
     def _load(self):
         try:
-            requests, responses = load_cassette(
-                self._path,
-                serializer=self._serializer
-            )
+            requests, responses = self._persister.load_cassette(self._path, serializer=self._serializer)
             for request, response in zip(requests, responses):
                 self.append(request, response)
             self.dirty = False
             self.rewound = True
-        except IOError:
+        except ValueError:
             pass
 
     def __str__(self):
-        return "<Cassette containing {0} recorded response(s)>".format(
-            len(self)
-        )
+        return "<Cassette containing {} recorded response(s)>".format(len(self))
 
     def __len__(self):
         """Return the number of request,response pairs stored in here"""
@@ -303,6 +351,6 @@ class Cassette(object):
     def __contains__(self, request):
         """Return whether or not a request has been stored"""
         for index, response in self._responses(request):
-            if self.play_counts[index] == 0:
+            if self.play_counts[index] == 0 or self.allow_playback_repeats:
                 return True
         return False
